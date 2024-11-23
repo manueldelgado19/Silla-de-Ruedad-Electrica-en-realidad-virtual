@@ -23,7 +23,9 @@ Script "MyMessage" en Unity
 Plugin Ardity para la comunicación serial
 
 PASOS PARA LA CONEXIÓN:
-Importar Ardity a tu proyecto de Unity
+Importar Ardity a tu proyecto de Unity, este pluggins se encuentra en la siguiente liga : https://assetstore.unity.com/packages/tools/integration/ardity-arduino-unity-communication-made-easy-123819
+si por alguna razon el link no funciona, buscar en asststore, ardity.
+
 Adjuntar el script "MyMessage" al objeto que deseas controlar
-Configurar el puerto serial en Unity
-Verificar la conexión entre Arduino y Unity
+Configurar el puerto serial en Unity este es serialcontroller, aqui se debe de adjuntar el maymessage
+
