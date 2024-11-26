@@ -27,5 +27,5 @@ Importar Ardity a tu proyecto de Unity, este pluggins se encuentra en la siguien
 si por alguna razon el link no funciona, buscar en asststore, ardity.
 
 Adjuntar el script "MyMessage" al objeto que deseas controlar
-Configurar el puerto serial en Unity este es serialcontroller, aqui se debe de adjuntar el maymessage
+Configurar el puerto serial en Unity este es  este serall se encuentra en la carpeta de ardity, aqui se debe de adjuntar el maymessage
 
