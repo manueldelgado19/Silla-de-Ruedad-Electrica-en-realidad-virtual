@@ -12,7 +12,6 @@ Joystick analógico
 Cable USB para conexión
 Abrir Arduino IDE
 Cargar el código "Joystick_Arduino"
-
 En el menú Herramientas:
 Seleccionar el modelo correcto de STM32
 Configurar los parámetros según el microcontrolador
@@ -56,7 +55,19 @@ Conectar el Arduino a la PC y asegurarse de que esté enviando datos en formato 
 Ejecutar el script en la PC donde está conectado el Arduino:
 python bridge.py
 
-En Unity, conectar un cliente WebSocket a ws://localhost:8080 para recibir los datos del joystick en tiempo real.7
-El programa en unity necesita un pluggin, este es websocket y se agrega a unity. 
-Dentro de unity creamos un programa que se llame mymessage y pegamos el codigo, deberia salir sin errores si agregamos el webscoket a pluggins. 
-si sale sin errores lo agregamos al objeto, usuario que se quiera mover. 
+Conectar un cliente WebSocket en Unity
+
+Unity debe establecer una conexión con el servidor WebSocket en ws://localhost:8080 para recibir los datos del joystick en tiempo real.
+Instalar el plugin WebSocket en Unity
+
+Es necesario un plugin de WebSocket compatible con la versión de Unity utilizada.
+El archivo .dll adecuado se encuentra en la carpeta websocket/lib.
+Si se usa la versión .NET Standard, se debe entrar en la carpeta standard y copiar el archivo .dll.
+Este archivo debe colocarse dentro de la carpeta Plugins en Unity para que el sistema lo reconozca correctamente.
+
+Crear el script en Unity
+En Unity, se debe crear un nuevo script en C# llamado MyMessage.cs.
+Se debe pegar el código correspondiente dentro del script.
+Si el plugin WebSocket se agregó correctamente, no deberían aparecer errores de compilación.
+Asignar el script al objeto en Unity
+Una vez validado que el script no tiene errores, se debe adjuntar al GameObject que representará al usuario o entidad que se desea mover en la escena. 
