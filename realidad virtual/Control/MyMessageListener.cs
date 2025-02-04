@@ -1,57 +1,111 @@
 using UnityEngine;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using System.Collections.Generic;
+using WebSocketSharp;
+using System.Linq;
 
 public class MyMessageListener : MonoBehaviour
 {
+    // Propiedades para el DataCombiner
+    public Vector2 UltimoInput
+    {
+        get { return inputsJoystick.Count > 0 ? inputsJoystick.Last() : Vector2.zero; }
+    }
+
+    public Vector3 UltimaPosicionSilla
+    {
+        get
+        {
+            return wheelchair != null ?
+                new Vector3(
+                    posicionX.Count > 0 ? posicionX.Last() : 0f,
+                    0f,
+                    posicionZ.Count > 0 ? posicionZ.Last() : 0f
+                ) : Vector3.zero;
+        }
+    }
+
+    public float UltimaRotacionSilla
+    {
+        get { return rotacionY.Count > 0 ? rotacionY.Last() : 0f; }
+    }
+
+    public string UltimaAccion
+    {
+        get { return acciones.Count > 0 ? acciones.Last() : "None"; }
+    }
+
     [Header("Referencias de Objetos")]
     public GameObject wheelchair;
     public Camera mainCamera;
 
-    [Header("ConfiguraciÃ³n de Movimiento")]
+    [Header("Configuración WebSocket")]
+    public string websocketURL = "ws://localhost:8080";
+    public float reconnectInterval = 2f;
+
+    [Header("Configuración de Movimiento")]
     public float movementSpeed = 5.0f;
     public float rotationSpeed = 100.0f;
     public float deadzone = 0.1f;
 
-    [Header("ConfiguraciÃ³n de Ejes")]
+    [Header("Configuración de Ejes")]
     public bool invertX = false;
     public bool invertY = false;
 
-    [Header("DiagnÃ³stico")]
+    [Header("Diagnóstico")]
     public bool enableDebugLogging = true;
     public bool showGizmos = true;
 
-    [Header("ConfiguraciÃ³n de Registro")]
+    [Header("Configuración de Registro")]
     public string carpetaGuardado = @"C:\Users\Manuel Delado\Documents";
     public string prefijoArchivo = "datos_joystick";
 
-    // Variables para recolecciÃ³n de datos
-    private List<float> tiempos = new List<float>();
-    private List<Vector2> inputsJoystick = new List<Vector2>();
-    private List<float> angulos = new List<float>();
-    private List<float> magnitudes = new List<float>();
-    private List<float> posicionX = new List<float>();
-    private List<float> posicionZ = new List<float>();
-    private List<float> rotacionY = new List<float>();
-    private List<string> acciones = new List<string>();
+    // Buffers de datos con capacidad fija
+    private const int DATA_BUFFER_SIZE = 1000;
+    private readonly Queue<float> tiempos = new Queue<float>(DATA_BUFFER_SIZE);
+    private readonly Queue<Vector2> inputsJoystick = new Queue<Vector2>(DATA_BUFFER_SIZE);
+    private readonly Queue<float> angulos = new Queue<float>(DATA_BUFFER_SIZE);
+    private readonly Queue<float> magnitudes = new Queue<float>(DATA_BUFFER_SIZE);
+    private readonly Queue<float> posicionX = new Queue<float>(DATA_BUFFER_SIZE);
+    private readonly Queue<float> posicionZ = new Queue<float>(DATA_BUFFER_SIZE);
+    private readonly Queue<float> rotacionY = new Queue<float>(DATA_BUFFER_SIZE);
+    private readonly Queue<string> acciones = new Queue<string>(DATA_BUFFER_SIZE);
+
+    // Variables de WebSocket y control
+    private WebSocket websocket;
+    private Vector2 currentInput;
+    private bool isConnected;
+    private const float MESSAGE_TIMEOUT = 3.0f;
+    private float lastMessageTime;
+    private float lastReconnectAttempt;
     private float tiempoInicio;
 
-    // Variables de control
-    private string debugLogPath;
-    private float lastMessageTime;
-    private const float MESSAGE_TIMEOUT = 3.0f;
-    private Vector2 lastJoystickInput;
-    private bool isConnected;
+    // Buffer para suavizado de movimiento
+    private Vector2[] inputBuffer = new Vector2[3];
+    private int bufferIndex = 0;
+
+    // Intervalo de recolección de datos
+    private float intervaloRecoleccion = 0.2f;
+    private float ultimoTiempoRecoleccion = 0f;
+
 
     void Start()
     {
+        if (!ValidateComponents()) return;
+        tiempoInicio = Time.time;
+        InitializeDebugLog();
+        InitializeWebSocket();
+    }
+
+    bool ValidateComponents()
+    {
         if (!wheelchair)
         {
-            Debug.LogError("Â¡Error: No se ha asignado el GameObject de la silla de ruedas!");
+            Debug.LogError("¡Error: No se ha asignado el GameObject de la silla de ruedas!");
             enabled = false;
-            return;
+            return false;
         }
 
         if (!mainCamera)
@@ -59,136 +113,189 @@ public class MyMessageListener : MonoBehaviour
             mainCamera = Camera.main;
             if (!mainCamera)
             {
-                Debug.LogError("Â¡Error: No se encontrÃ³ ninguna cÃ¡mara!");
+                Debug.LogError("¡Error: No se encontró ninguna cámara!");
                 enabled = false;
-                return;
+                return false;
             }
         }
 
-        tiempoInicio = Time.time;
-        InitializeDebugLog();
-        LogMessage("Sistema iniciado - Esperando datos del joystick...");
+        if (!UnityMainThreadDispatcher.Instance())
+        {
+            Debug.LogError("¡Error: No se encontró UnityMainThreadDispatcher en la escena!");
+            enabled = false;
+            return false;
+        }
+
+        return true;
     }
 
-    void InitializeDebugLog()
+    void InitializeWebSocket()
     {
-        debugLogPath = Path.Combine(Application.dataPath, "wheelchair_debug.txt");
-        lastMessageTime = Time.time;
         try
         {
-            File.WriteAllText(debugLogPath, $"=== Inicio de sesiÃ³n: {DateTime.Now} ===\n");
+            if (websocket != null)
+            {
+                websocket.Close();
+                websocket = null;
+            }
+
+            websocket = new WebSocket(websocketURL);
+
+            websocket.OnMessage += (sender, e) => {
+                UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                    ProcessWebSocketMessage(e.Data);
+                });
+            };
+
+            websocket.OnOpen += (sender, e) => {
+                UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                    isConnected = true;
+                    Debug.Log("WebSocket conectado");
+                    lastMessageTime = Time.time;
+                });
+            };
+
+            websocket.OnClose += (sender, e) => {
+                UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                    isConnected = false;
+                    Debug.Log("WebSocket desconectado");
+                });
+            };
+
+            websocket.OnError += (sender, e) => {
+                UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                    Debug.LogError($"Error WebSocket: {e.Message}");
+                    isConnected = false;
+                });
+            };
+
+            websocket.Connect();
+            lastReconnectAttempt = Time.time;
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error al crear archivo de log: {e.Message}");
-            enableDebugLogging = false;
+            Debug.LogError($"Error al inicializar WebSocket: {e.Message}");
+            isConnected = false;
+        }
+    }
+
+    void ProcessWebSocketMessage(string message)
+    {
+        try
+        {
+            string[] data = message.Split(',');
+            if (data.Length == 2)
+            {
+                float angle = float.Parse(data[0]);
+                float magnitude = float.Parse(data[1]) / 100f;
+
+                if (invertX) angle = 360 - angle;
+                if (invertY) magnitude *= -1;
+
+                float rad = angle * Mathf.Deg2Rad;
+                Vector2 input = new Vector2(
+                    Mathf.Cos(rad) * magnitude,
+                    Mathf.Sin(rad) * magnitude
+                );
+
+                // Actualizar buffer para suavizado
+                inputBuffer[bufferIndex] = input;
+                bufferIndex = (bufferIndex + 1) % inputBuffer.Length;
+
+                // Calcular promedio para suavizar el movimiento
+                currentInput = Vector2.zero;
+                for (int i = 0; i < inputBuffer.Length; i++)
+                {
+                    currentInput += inputBuffer[i];
+                }
+                currentInput /= inputBuffer.Length;
+
+                lastMessageTime = Time.time;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"Error procesando mensaje: {e.Message}");
         }
     }
 
     void Update()
     {
-        if (Time.time - lastMessageTime > MESSAGE_TIMEOUT && isConnected)
+        // Verificar el estado de la conexión
+        CheckConnectionStatus();
+
+        // Aplicar movimiento si está sobre el deadzone
+        if (currentInput.magnitude > deadzone && isConnected)
         {
-            LogWarning($"Â¡No se han recibido datos del joystick en {MESSAGE_TIMEOUT} segundos!");
-            isConnected = false;
+            ApplyMovement();
         }
 
-        if (lastJoystickInput.magnitude > deadzone)
+        // Recolección de datos en intervalos
+        if (Time.time - ultimoTiempoRecoleccion >= intervaloRecoleccion)
         {
-            ApplyMovement(lastJoystickInput);
+            RegistrarDatosEnIntervalo(currentInput);
+            ultimoTiempoRecoleccion = Time.time;
         }
     }
 
-    void OnMessageArrived(string msg)
+    void CheckConnectionStatus()
     {
-        lastMessageTime = Time.time;
-        isConnected = true;
-        LogMessage($"Datos recibidos: {msg}");
-
-        if (ProcessJoystickData(msg, out Vector2 joystickInput))
+        if (!isConnected || Time.time - lastMessageTime > MESSAGE_TIMEOUT)
         {
-            lastJoystickInput = joystickInput;
-            RegistrarDatos(msg, joystickInput);
+            if (Time.time - lastReconnectAttempt >= reconnectInterval)
+            {
+                Debug.Log("Intentando reconectar...");
+                InitializeWebSocket();
+            }
+
+            if (currentInput.magnitude > 0)
+            {
+                currentInput = Vector2.zero;
+                for (int i = 0; i < inputBuffer.Length; i++)
+                {
+                    inputBuffer[i] = Vector2.zero;
+                }
+            }
         }
     }
 
-    bool ProcessJoystickData(string msg, out Vector2 joystickInput)
+    void ApplyMovement()
     {
-        joystickInput = Vector2.zero;
-        string[] data = msg.Split(',');
+        // Rotación
+        float rotationAmount = currentInput.x * rotationSpeed * Time.deltaTime;
+        wheelchair.transform.Rotate(0, -rotationAmount, 0);
 
-        if (data.Length < 2)
-        {
-            LogError($"Formato de mensaje invÃ¡lido. Se esperan 2 valores, recibidos: {data.Length}");
-            return false;
-        }
-
-        try
-        {
-            float angle = float.Parse(data[0]);
-            float magnitude = float.Parse(data[1]);
-
-            if (invertX) angle = 360 - angle;
-            if (invertY) magnitude *= -1;
-
-            angle = NormalizeAngle(angle);
-
-            float rad = angle * Mathf.Deg2Rad;
-            joystickInput.x = Mathf.Cos(rad) * magnitude / 100f;
-            joystickInput.y = Mathf.Sin(rad) * magnitude / 100f;
-
-            // Invertir el eje X para cambiar la direcciÃ³n de giro
-            joystickInput.x *= -1;
-
-            LogMessage($"Procesado - Ãngulo: {angle:F2}Â° Magnitud: {magnitude:F2}% -> X: {joystickInput.x:F2} Y: {joystickInput.y:F2}");
-            return true;
-        }
-        catch (Exception e)
-        {
-            LogError($"Error al procesar datos del joystick: {e.Message}");
-            return false;
-        }
+        // Movimiento
+        float moveAmount = currentInput.y * movementSpeed * Time.deltaTime;
+        Vector3 movement = wheelchair.transform.right * (-moveAmount);
+        wheelchair.transform.position += movement;
     }
 
-    void RegistrarDatos(string mensajeOriginal, Vector2 input)
-    {
-        string[] data = mensajeOriginal.Split(',');
-        float angulo = float.Parse(data[0]);
-        float magnitud = float.Parse(data[1]);
-
-        // Registrar tiempo
-        tiempos.Add(Time.time - tiempoInicio);
-
-        // Registrar input del joystick
-        inputsJoystick.Add(input);
-
-        // Registrar Ã¡ngulo y magnitud
-        angulos.Add(angulo);
-        magnitudes.Add(magnitud);
-
-        // Registrar solo las posiciones y rotaciones relevantes
-        posicionX.Add(wheelchair.transform.position.x);
-        posicionZ.Add(wheelchair.transform.position.z);
-        rotacionY.Add(wheelchair.transform.eulerAngles.y);
-
-        // Determinar y registrar la acciÃ³n con direcciones invertidas
-        string accion = DeterminarAccion(input);
-        acciones.Add(accion);
-    }
-
-    void ApplyMovement(Vector2 input)
+    void RegistrarDatosEnIntervalo(Vector2 input)
     {
         if (!wheelchair) return;
 
-        // Aplicar rotaciÃ³n y movimiento simultÃ¡neamente
-        float rotationAmount = input.x * rotationSpeed * Time.deltaTime;
-        wheelchair.transform.Rotate(0, rotationAmount, 0);
+        // Mantener el buffer en un tamaño fijo
+        if (tiempos.Count >= DATA_BUFFER_SIZE)
+        {
+            tiempos.Dequeue();
+            inputsJoystick.Dequeue();
+            angulos.Dequeue();
+            magnitudes.Dequeue();
+            posicionX.Dequeue();
+            posicionZ.Dequeue();
+            rotacionY.Dequeue();
+            acciones.Dequeue();
+        }
 
-        float moveAmount = input.y * movementSpeed * Time.deltaTime;
-        Vector3 movement = wheelchair.transform.right * (-moveAmount);
-        wheelchair.transform.position += movement;
-
-        LogMessage($"Movimiento aplicado - RotaciÃ³n: {rotationAmount:F2}, Movimiento: {moveAmount:F2}");
+        tiempos.Enqueue(Time.time - tiempoInicio);
+        inputsJoystick.Enqueue(input);
+        angulos.Enqueue(Mathf.Atan2(input.y, input.x) * Mathf.Rad2Deg);
+        magnitudes.Enqueue(input.magnitude);
+        posicionX.Enqueue(wheelchair.transform.position.x);
+        posicionZ.Enqueue(wheelchair.transform.position.z);
+        rotacionY.Enqueue(wheelchair.transform.eulerAngles.y);
+        acciones.Enqueue(DeterminarAccion(input));
     }
 
     string DeterminarAccion(Vector2 input)
@@ -200,7 +307,6 @@ public class MyMessageListener : MonoBehaviour
         if (input.y > deadzone) accionesActuales.Add("Avanzando");
         else if (input.y < -deadzone) accionesActuales.Add("Retrocediendo");
 
-        // Invertir la detecciÃ³n de direcciÃ³n para el registro
         if (input.x > deadzone) accionesActuales.Add("Girando Izquierda");
         else if (input.x < -deadzone) accionesActuales.Add("Girando Derecha");
 
@@ -210,20 +316,28 @@ public class MyMessageListener : MonoBehaviour
     public void GuardarDatosEnCSV()
     {
         StringBuilder csv = new StringBuilder();
+        csv.AppendLine("Time,Input_X_Normalized,Input_Y_Normalized,Angle,Magnitude,Position_X,Position_Z,Rotation_Y,Action");
 
-        // Cabecera simplificada
-        csv.AppendLine("Tiempo,Input_X,Input_Y,Angulo,Magnitud,Posicion_X,Posicion_Z,Rotacion_Y,Accion");
+        var tiemposArray = tiempos.ToArray();
+        var inputsArray = inputsJoystick.ToArray();
+        var angulosArray = angulos.ToArray();
+        var magnitudesArray = magnitudes.ToArray();
+        var posicionXArray = posicionX.ToArray();
+        var posicionZArray = posicionZ.ToArray();
+        var rotacionYArray = rotacionY.ToArray();
+        var accionesArray = acciones.ToArray();
 
-        // Datos simplificados
         for (int i = 0; i < tiempos.Count; i++)
         {
+            float inputXInverted = -inputsArray[i].x;
+
             csv.AppendLine(
-                $"{tiempos[i]:F3}," +
-                $"{inputsJoystick[i].x:F6},{inputsJoystick[i].y:F6}," +
-                $"{angulos[i]:F2},{magnitudes[i]:F2}," +
-                $"{posicionX[i]:F6},{posicionZ[i]:F6}," +
-                $"{rotacionY[i]:F2}," +
-                $"{acciones[i]}"
+                $"{tiemposArray[i]:F3}," +
+                $"{inputXInverted:F6},{inputsArray[i].y:F6}," +
+                $"{angulosArray[i]:F2},{magnitudesArray[i]:F2}," +
+                $"{posicionXArray[i]:F6},{posicionZArray[i]:F6}," +
+                $"{rotacionYArray[i]:F2}," +
+                $"{accionesArray[i]}"
             );
         }
 
@@ -232,108 +346,67 @@ public class MyMessageListener : MonoBehaviour
 
     void GuardarArchivo(string contenido)
     {
-        bool archivoGuardado = false;
-        int intentos = 0;
-        string rutaArchivo = "";
-
-        while (!archivoGuardado && intentos < 5)
-        {
-            try
-            {
-                rutaArchivo = ObtenerSiguienteNombreArchivo(carpetaGuardado, prefijoArchivo, ".csv");
-                File.WriteAllText(rutaArchivo, contenido);
-                archivoGuardado = true;
-                Debug.Log($"Datos guardados exitosamente en: {rutaArchivo}");
-            }
-            catch (IOException)
-            {
-                intentos++;
-                System.Threading.Thread.Sleep(100);
-            }
-        }
-
-        if (!archivoGuardado)
-        {
-            string fechaHora = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            rutaArchivo = Path.Combine(carpetaGuardado, $"{prefijoArchivo}_{fechaHora}.csv");
-            File.WriteAllText(rutaArchivo, contenido);
-            Debug.Log($"Datos guardados con timestamp en: {rutaArchivo}");
-        }
-    }
-
-    string ObtenerSiguienteNombreArchivo(string carpeta, string prefijo, string extension)
-    {
-        int numero = 1;
-        string nombreArchivo;
-        do
-        {
-            nombreArchivo = Path.Combine(carpeta, $"{prefijo}{numero}{extension}");
-            numero++;
-        } while (File.Exists(nombreArchivo));
-        return nombreArchivo;
-    }
-
-    void OnConnectionEvent(bool success)
-    {
-        isConnected = success;
-        LogMessage($"Estado de conexiÃ³n: {(success ? "Conectado" : "Desconectado")}");
-    }
-
-    float NormalizeAngle(float angle)
-    {
-        angle = angle % 360;
-        return angle < 0 ? angle + 360 : angle;
-    }
-
-    void LogMessage(string message)
-    {
-        if (!enableDebugLogging) return;
-
-        string timeStamp = DateTime.Now.ToString("HH:mm:ss.fff");
-        string logMessage = $"[{timeStamp}] {message}\n";
-
-        Debug.Log(logMessage);
         try
         {
-            File.AppendAllText(debugLogPath, logMessage);
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string rutaArchivo = Path.Combine(carpetaGuardado, $"{prefijoArchivo}_{timestamp}.csv");
+            File.WriteAllText(rutaArchivo, contenido);
+            Debug.Log($"Datos guardados exitosamente en: {rutaArchivo}");
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error al escribir en el log: {e.Message}");
+            Debug.LogError($"Error al guardar archivo: {e.Message}");
         }
     }
 
-    void LogError(string message)
+    void InitializeDebugLog()
     {
-        LogMessage($"ERROR: {message}");
-        Debug.LogError(message);
-    }
-
-    void LogWarning(string message)
-    {
-        LogMessage($"ADVERTENCIA: {message}");
-        Debug.LogWarning(message);
+        try
+        {
+            string logDirectory = Path.Combine(Application.persistentDataPath, "Logs");
+            if (!Directory.Exists(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+            Debug.Log($"Log directory initialized at: {logDirectory}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error initializing log directory: {e.Message}");
+            enableDebugLogging = false;
+        }
     }
 
     void OnDrawGizmos()
     {
         if (!showGizmos || !wheelchair) return;
 
-        // Dibujar direcciÃ³n de movimiento
         Gizmos.color = Color.blue;
         Vector3 position = wheelchair.transform.position;
         Gizmos.DrawLine(position, position + wheelchair.transform.forward * 2);
 
-        // Dibujar input del joystick
-        if (lastJoystickInput.magnitude > deadzone)
+        if (currentInput.magnitude > deadzone)
         {
             Gizmos.color = Color.green;
-            Vector3 inputDirection = new Vector3(lastJoystickInput.x, 0, lastJoystickInput.y);
+            Vector3 inputDirection = new Vector3(currentInput.x, 0, currentInput.y);
             Gizmos.DrawLine(position, position + inputDirection * 2);
         }
     }
 
     void OnDisable()
+    {
+        if (websocket != null)
+        {
+            if (websocket.ReadyState == WebSocketState.Open)
+            {
+                websocket.Close();
+            }
+            websocket = null;
+        }
+        GuardarDatosEnCSV();
+    }
+
+    void OnApplicationQuit()
     {
         GuardarDatosEnCSV();
     }
