@@ -10,16 +10,11 @@ C#
 Biblioteca LineRenderer
 Dispositivo compatible con VR (opcional)
 
-2. Instalación
+2. Instalacion
 
-Clona este repositorio:
+Arrastrar los archivos que se encuentran aqui cs al repositorio.
 
-git clone https://github.com/tuusuario/tu-repositorio.git
-Abre el proyecto en Unity.
-Asegúrate de importar los paquetes necesarios en el Package Manager.
-Configura el LineRenderer dentro del objeto de la silla de ruedas si es necesario.
-
-3. Uso del Proyecto
+4. Uso del Proyecto
 
 Ejecuta la escena principal en Unity.
 Coloca la silla de ruedas en la escena y define su punto de inicio.
