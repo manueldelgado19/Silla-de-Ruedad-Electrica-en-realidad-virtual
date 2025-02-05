@@ -1,6 +1,5 @@
 Descripción del Proyecto
-
-Este proyecto implementa un sistema de seguimiento y análisis de la dirección y velocidad de la mirada en Unity. Se utilizan LineRenderer y cálculos de desviación para analizar el comportamiento de la mirada en entornos de realidad virtual.
+Se implementa un sistema de seguimiento y análisis de la dirección y velocidad de la mirada en Unity. Se utilizan LineRenderer y cálculos de desviación para analizar el comportamiento de la mirada en entornos de realidad virtual.
 
 1. Requisitos
 
