@@ -9,6 +9,7 @@ Hacer clic en el botón '+' en la esquina superior izquierda
 Seleccionar "Agregar paquete desde la URL de git"
 Pegue esta URL: https://github.com/Whinarn/UnityMeshSimplifier.git
 Teniendo el código poligonos_reducir en Unity, se adjunta este a un objeto vacío. Automáticamente saldrá un menú en el cual se le agregan aquellos objetos que se busca simplificar los polígonos en los objetos.
+Se debe agregar el sript boton poligonos el cual lo que hace es simplemente ser un boton para iniciar todo el proceso. 
 
 
 INSTANCIA DE GPU: Una herramienta para Unity que ayuda a configurar Instancia de GPU de manera automática es la siguiente:
