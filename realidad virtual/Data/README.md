@@ -45,6 +45,10 @@ Agrega una ventana en el editor de Unity para seleccionar el número de particip
 Guarda la configuración utilizando PlayerPrefs.
 Genera la estructura de carpetas automáticamente para almacenar los datos.
 
+4.3. CybersicknessRecorder.cs
+
+Registra el estado de mareo cibernético del participante mediante una simple pulsación de tecla. Alterna entre estados (0=sin mareo, 1=con mareo) presionando la tecla espaciadora, proporcionando feedback visual en pantalla. Captura datos a intervalos regulares configurables (por defecto cada 0.2 segundos). Almacena una serie temporal que incluye tiempo transcurrido y estado binario de mareo. Se integra con DataCombiner a través de la propiedad UltimoEstadoSickness para análisis correlacionados. Guarda automáticamente los datos en formato CSV al finalizar la sesión o manualmente presionando la tecla S. Facilita la identificación de patrones entre movimientos en el entorno virtual y la aparición de síntomas de mareo cibernético.
+
 5. Guardado de Datos en CSV
 
 Los datos de velocidad angular, desviación, permanencia y posición se registran automáticamente.
