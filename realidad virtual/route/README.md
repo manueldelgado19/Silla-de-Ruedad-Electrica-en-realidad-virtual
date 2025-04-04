@@ -42,6 +42,14 @@ Detecta cuando la silla de ruedas entra en zonas específicas dentro de la escen
 Registra tareas y comandos según la zona activada.
 Interactúa con DataCombiner para actualizar registros de actividad.
 
+4.3.  Autopathfolower.cs
+
+Detecta la ruta que tiene que seguir y mediante procesos internos realiza el recorrido automaticamente siguiendo la ruta (linea)
+
+4.4 EtapaAudioManager.cs
+
+Ya que el experimento lleva diferentes audios debido a que son diferentes las etapas que tiene que realizar el usurio, este e sun gestor en el cual se le asigna el audio que se quiera escuchar en la etapa, esto va de la mano con el selector de participante , ya que este tiene que leer  de este cual es la etapa seleccionada
+
 5. Guardado de Datos en CSV
 
 Los datos de posición y desviación se registran automáticamente cada cierto intervalo de tiempo.
